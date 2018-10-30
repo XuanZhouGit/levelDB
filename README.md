@@ -84,28 +84,29 @@ bash-3.00$ ls
 b+ tree是各种传统db及磁盘索引结构，它的缺点在于每次写操作都可能带来多次的磁盘IO(磁头的旋转和寻道都很耗时，所以顺序读写性能都会优于随机读写)，写开销很大，怎样避免磁盘IO呢，LSM tree(Log-Structured Merge-Tree)就是为了优化磁盘写的一种存储结构, 是由The Log-Structured Merge-Tree 提出的，主要是通过将随机写操作转换为内存写和log追加，再批量写入磁盘。levelDB就是基于这种存储结构实现的。
 # 2.2 levelDB的整体结构
 ![structure](https://github.com/XuanZhouGit/levelDB/blob/master/levelDB.PNG)
-其中：
-内存中的结构：
-(1) memtable: 是内存中的一个跳表结构。当用户向levelDB中写入数据时，会先向log file中写入一条log记录，然后将这个key-value插入跳表中(为什么要使用跳表，后面会介绍)
-(2) immutable table:正在进行compact的memtable。当memtable的占用的内存到达write_buffer_size，就会将这个memtable变为immutable table，并重新生成新的memtable和log file
+
+其中
+内存中的结构
+1. memtable: 是内存中的一个跳表结构。当用户向levelDB中写入数据时，会先向log file中写入一条log记录，然后将这个key-value插入跳表中(为什么要使用跳表，后面会介绍)
+2. immutable table:正在进行compact的memtable。当memtable的占用的内存到达write_buffer_size，就会将这个memtable变为immutable table，并重新生成新的memtable和log file
 
  磁盘中的结构
- (1) level0: 这个level比较特殊，其中的每个文件都是对immutable table进行compaction生成的，每个文件内部都是由一些有序key-value record组成的block的集合，但是文件和文件之间是无序的，可能有重叠(为什么需要这个特殊的的level)
- (2) level1~levelN：这些level的结构比较相似，每层level里也是一些key-value有序的sst file，但是同一层的sst file之间也是有序的，所以在同一层的sst files之间不存在重叠的key-value，其中levelK的总容量为10^K，但每个文件大小都是2M
- (3) log file: 用于记录DB操作，用于恢复还没有写入磁盘的memTable, immutable table操作，保证数据一致性。文件名中含有log num，必须保证每次新建的log file的log num最大，以此保证log num最大的log file是最新的
- (4) manifest file: log文件，由若干条记录组成(快照+若干条version_edit信息)，每次进行compaction后，就会进行version更新，manifest就会将记录version中文件的变化等信息作为一条record写入文件。当需要文件恢复时，通过当前manifest文件的所有record就能获得当前所有level的信息，再通过读log文件，就能恢复memTable, immutable table的信息
- (5) current file: 指向当前version的manifest file
+1. level0: 这个level比较特殊，其中的每个文件都是对immutable table进行compaction生成的，每个文件内部都是由一些有序key-value record组成的block的集合，但是文件和文件之间是无序的，可能有重叠(为什么需要这个特殊的的level)
+2. level1~levelN：这些level的结构比较相似，每层level里也是一些key-value有序的sst file，但是同一层的sst file之间也是有序的，所以在同一层的sst files之间不存在重叠的key-value，其中levelK的总容量为10^K，但每个文件大小都是2M
+3. log file: 用于记录DB操作，用于恢复还没有写入磁盘的memTable, immutable table操作，保证数据一致性。文件名中含有log num，必须保证每次新建的log file的log num最大，以此保证log num最大的log file是最新的
+4. manifest file: log文件，由若干条记录组成(快照+若干条version_edit信息)，每次进行compaction后，就会进行version更新，manifest就会将记录version中文件的变化等信息作为一条record写入文件。当需要文件恢复时，通过当前manifest文件的所有record就能获得当前所有level的信息，再通过读log文件，就能恢复memTable, immutable table的信息
+5. current file: 指向当前version的manifest file
 # 3. 文件结构
 ## 3.1 背景知识
-(1) slice:是levelDB中最基本的结构，和string类似，包括一个指向字符串的指针及其长度，主要包含一些字符串操作的函数：
+1. slice:是levelDB中最基本的结构，和string类似，包括一个指向字符串的指针及其长度，主要包含一些字符串操作的函数：
 ```
 const char* data_;
 size_t size_;
 ```
-(2) status: levelDB中的消息传递类
-(3) Arena: 一个比较简单的内存池，为memtable分配内存
-(4) skip list: memtable的主要结构(线程安全)，进行逻辑删除，只对删除的key-value做标记，在compaction的时候才进行删除记录。其查找，插入及删除(只进行逻辑删除)的复杂度都为logN，同时实现比平衡二叉树简单很多，而且用概率的方式平衡性更好。具体细节可以参考:Skiplist vs Non-blocking 
-(5) Varint:不定长整数，每个byte中最高用来标记是否结束，其余7位用来表示数字，最高为0，表示该bit为整数的最后一个byte
+2. status: levelDB中的消息传递类
+3. Arena: 一个比较简单的内存池，为memtable分配内存
+4. skip list: memtable的主要结构(线程安全)，进行逻辑删除，只对删除的key-value做标记，在compaction的时候才进行删除记录。其查找，插入及删除(只进行逻辑删除)的复杂度都为logN，同时实现比平衡二叉树简单很多，而且用概率的方式平衡性更好。具体细节可以参考:Skiplist vs Non-blocking 
+5. Varint:不定长整数，每个byte中最高用来标记是否结束，其余7位用来表示数字，最高为0，表示该bit为整数的最后一个byte
 ## 3.2 memTable结构
 ![memTable](https://github.com/XuanZhouGit/levelDB/blob/master/levelDB2.PNG)
 在levelDB中，用户输入的key-value中的key会与SequenceNumber及ValueType构成InternalKey, InternalKey是levelDB中用于比较索引的key, 每个InternalKey都是唯一的
