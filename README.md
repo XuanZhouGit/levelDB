@@ -84,13 +84,11 @@ bash-3.00$ ls
 b+ tree是各种传统db及磁盘索引结构，它的缺点在于每次写操作都可能带来多次的磁盘IO(磁头的旋转和寻道都很耗时，所以顺序读写性能都会优于随机读写)，写开销很大，怎样避免磁盘IO呢，LSM tree(Log-Structured Merge-Tree)就是为了优化磁盘写的一种存储结构, 是由The Log-Structured Merge-Tree 提出的，主要是通过将随机写操作转换为内存写和log追加，再批量写入磁盘。levelDB就是基于这种存储结构实现的。
 # 2.2 levelDB的整体结构
 ![structure](https://github.com/XuanZhouGit/levelDB/blob/master/levelDB.PNG)
-
-其中
-内存中的结构
+其中:
+内存中的结构:
 1. memtable: 是内存中的一个跳表结构。当用户向levelDB中写入数据时，会先向log file中写入一条log记录，然后将这个key-value插入跳表中(为什么要使用跳表，后面会介绍)
 2. immutable table:正在进行compact的memtable。当memtable的占用的内存到达write_buffer_size，就会将这个memtable变为immutable table，并重新生成新的memtable和log file
-
- 磁盘中的结构
+磁盘中的结构
 1. level0: 这个level比较特殊，其中的每个文件都是对immutable table进行compaction生成的，每个文件内部都是由一些有序key-value record组成的block的集合，但是文件和文件之间是无序的，可能有重叠(为什么需要这个特殊的的level)
 2. level1~levelN：这些level的结构比较相似，每层level里也是一些key-value有序的sst file，但是同一层的sst file之间也是有序的，所以在同一层的sst files之间不存在重叠的key-value，其中levelK的总容量为10^K，但每个文件大小都是2M
 3. log file: 用于记录DB操作，用于恢复还没有写入磁盘的memTable, immutable table操作，保证数据一致性。文件名中含有log num，必须保证每次新建的log file的log num最大，以此保证log num最大的log file是最新的
